@@ -1,0 +1,6 @@
+{
+  "name": "Intent Firewall",
+  "description": "The Cryptographic Trust Layer for Autonomous AI Agents",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
