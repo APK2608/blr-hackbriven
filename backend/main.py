@@ -241,9 +241,17 @@ async def health_check():
 # ── NEW ENDPOINT: Active Intent ────────────────────────────────────────────────
 @app.get("/active-intent/{user_id}")
 async def get_active_intent(user_id: str):
+    """Fetch the most recent active intent for a user. Used for cross-tab sync."""
+    # First try to find a plan by the exact Supabase Auth UUID
     plan_query = db.table("plans").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
+
+    # Fall back to the globally most recent plan if no user-specific plan found
+    if not plan_query.data:
+        plan_query = db.table("plans").select("*").order("created_at", desc=True).limit(1).execute()
+
     if not plan_query.data:
         raise HTTPException(status_code=404, detail="No active intent found")
+
     plan = plan_query.data[0]
     contract = _load_contract(plan.get("intent", "{}"))
     return {
@@ -289,9 +297,9 @@ async def capture_intent(request: CaptureIntentRequest):
     ts = _now()
 
     # Persist to Supabase (plans table)
-    db.table("plans").insert({
+    # user_id is the Supabase Auth UUID sent from the dashboard frontend
+    insert_record = {
         "id": intent_id,
-        "user_id": request.agent_id or "agent_anonymous",
         "goal": goal,
         "intent_hash": contract["intent_hash"],
         "merkle_root": contract["merkle_root"],
@@ -300,7 +308,11 @@ async def capture_intent(request: CaptureIntentRequest):
         "intent": json.dumps(contract),
         "status": "active",
         "created_at": ts
-    }).execute()
+    }
+    # Only set user_id (UUID) if a real UUID is provided — avoids type errors
+    if request.user_id:
+        insert_record["user_id"] = request.user_id
+    db.table("plans").insert(insert_record).execute()
 
     # Audit: capture event
     _safe_insert_audit({

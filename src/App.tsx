@@ -138,6 +138,7 @@ export default function App() {
       const response = await captureIntent({
         goal,
         agent_id: 'intent-firewall-dashboard',
+        user_id: user?.id,
         metadata: { source: 'dashboard' }
       });
 
