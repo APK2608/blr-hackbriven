@@ -139,6 +139,7 @@ class CaptureIntentRequest(BaseModel):
 
 class CaptureIntentResponse(BaseModel):
     intent_id: str
+    status: str = "active"
     intent_hash: str
     signature: str
     merkle_root: str
@@ -198,7 +199,7 @@ def _safe_insert_audit(record: dict):
 # ── NEW: Browser Action (Chrome Extension) ────────────────────────────────────
 
 class BrowserActionRequest(BaseModel):
-    intent_id: str
+    intent_id: Optional[str] = None
     action: str                         # e.g. "navigate_url", "add_to_cart", "submit_payment"
     url: str                            # full URL where the action occurred
     details: Optional[dict] = {}        # hostname, element_text, page_title, etc.
@@ -239,11 +240,15 @@ async def health_check():
 
 
 # ── NEW ENDPOINT: Active Intent ────────────────────────────────────────────────
-@app.get("/active-intent/{user_id}")
-async def get_active_intent(user_id: str):
-    """Fetch the most recent active intent for a user. Used for cross-tab sync."""
-    # First try to find a plan by the exact Supabase Auth UUID
-    plan_query = db.table("plans").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
+@app.get("/active-intent/{identifier}")
+async def get_active_intent(identifier: str):
+    """Fetch the active intent. identifier can be a user_id or an intent_id."""
+    # First try to find a plan by exact intent_id
+    plan_query = db.table("plans").select("*").eq("id", identifier).execute()
+    
+    # Next try by user_id
+    if not plan_query.data:
+        plan_query = db.table("plans").select("*").eq("user_id", identifier).order("created_at", desc=True).limit(1).execute()
 
     # Fall back to the globally most recent plan if no user-specific plan found
     if not plan_query.data:
@@ -261,6 +266,7 @@ async def get_active_intent(user_id: str):
         "merkle_root": plan["merkle_root"],
         "agent_id": plan["agent_id"],
         "goal": plan["goal"],
+        "status": "active",
         "allowed_actions": contract.get("allowed_actions", []),
         "created_at": plan["created_at"],
         "version": "3.0.0"
@@ -336,6 +342,7 @@ async def capture_intent(request: CaptureIntentRequest):
         allowed_actions=allowed_actions,
         agent_id=contract["agent_id"],
         goal=goal,
+        status="active",
         created_at=ts,
         version=contract.get("version", "ArmorIQ-v3.0")
     )
@@ -459,12 +466,23 @@ async def track_browser_action(request: BrowserActionRequest):
     audit_id = str(uuid.uuid4())
     ts = request.timestamp or _now()
 
-    # 1. Fetch signed intent contract
+    # 1. Fetch signed intent contract (or handle mock request)
+    if not request.intent_id:
+        return {
+            "status": "unmonitored",
+            "decision": "allow",
+            "action": request.action,
+            "risk_score": 0,
+            "drift_score": 100.0,
+            "reason": "Compatibility mode"
+        }
+
     plan_query = db.table("plans").select("intent", "goal").eq("id", request.intent_id).execute()
     if not plan_query.data:
         # Graceful: if intent not found, allow but flag as unmonitored
         return {
             "status": "unmonitored",
+            "decision": "allow",
             "action": request.action,
             "intent_id": request.intent_id,
             "risk_score": 0,
@@ -549,8 +567,10 @@ async def track_browser_action(request: BrowserActionRequest):
     _safe_insert_audit(audit_record)
     _emit_event(audit_record)   # Push to SSE live stream
 
+    decision = "allow" if status == "allowed" else "block"
     return {
         "status": status,
+        "decision": decision,
         "action": request.action,
         "intent_id": request.intent_id,
         "risk_score": risk_score,
@@ -904,3 +924,16 @@ async def get_intent_details_legacy(plan_id: str):
     plan = plan_query.data[0]
     contract = _load_contract(plan.get("intent", "{}"))
     return {"plan_id": plan_id, "plan": plan, "contract": contract}
+
+
+@app.get("/events/stream")
+async def events_stream(request: Request):
+    """Return a Server Sent Events stream. Send heartbeats every 2s."""
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': _now()})}\n\n"
+            await asyncio.sleep(2)
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
