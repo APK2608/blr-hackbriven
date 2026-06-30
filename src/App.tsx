@@ -88,13 +88,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  if (isAuthLoading) {
-    return <div className="min-h-screen bg-black flex items-center justify-center"><div className="animate-spin h-8 w-8 border-2 border-emerald-500 border-t-transparent rounded-full"></div></div>;
-  }
-
-  if (!user) {
-    return <Auth />;
-  }
+  // Auth checks are now handled in the main render to avoid React Hooks violations
 
   // Update Trust Score based on Ratio of Allowed/Blocked
   useEffect(() => {
@@ -479,6 +473,14 @@ export default function App() {
     setThreatAlert(null);
     setCustomLogsText('AGENT_BOUND_DAEMON :: started listening on port 3000\nARMOR_IQ :: cryptographic contract layer loaded\n[INFO] System reset initiated by operator\n');
   };
+
+  if (isAuthLoading) {
+    return <div className="min-h-screen bg-black flex items-center justify-center"><div className="animate-spin h-8 w-8 border-2 border-emerald-500 border-t-transparent rounded-full"></div></div>;
+  }
+
+  if (!user) {
+    return <Auth />;
+  }
 
   return (
     <div className="min-h-screen bg-[#070708] text-zinc-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-300">
