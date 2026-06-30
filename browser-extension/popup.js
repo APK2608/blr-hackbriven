@@ -61,6 +61,23 @@ btnStart.addEventListener('click', async () => {
     });
     const data = await res.json();
 
+    // ── Save intent to localStorage so the dashboard on any tab can read it ──
+    const intentPayload = {
+      intent_id: data.intent_id,
+      intent_hash: data.intent_hash,
+      signature: data.signature,
+      merkle_root: data.merkle_root,
+      agent_id: data.agent_id,
+      allowed_actions: data.allowed_actions,
+      goal: data.goal,
+      created_at: data.created_at,
+      version: data.version,
+      activated_at: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem('intent_firewall_active', JSON.stringify(intentPayload));
+    } catch (_) {}
+
     // Tell background service worker to start monitoring
     chrome.runtime.sendMessage({
       type: 'SET_INTENT',

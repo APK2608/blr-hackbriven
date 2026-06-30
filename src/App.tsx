@@ -101,10 +101,15 @@ export default function App() {
     setMetrics(prev => ({ ...prev, trustScore: Math.max(0, Math.min(100, computed)) }));
   }, [metrics.allowedActions, metrics.totalActions]);
 
-  // Fetch active intent on load if user is logged in
+  // Fetch active intent on load — reads localStorage (set by extension) first, then falls back to API
   useEffect(() => {
-    if (user) {
-      getActiveIntent(user.id).then(response => {
+    if (!user) return;
+
+    // 1. Try localStorage first (written by browser extension popup.js immediately on activation)
+    try {
+      const stored = localStorage.getItem('intent_firewall_active');
+      if (stored) {
+        const response = JSON.parse(stored);
         const mockPlan: PlanData = {
           plan_id: response.intent_id,
           contract: {
@@ -112,20 +117,42 @@ export default function App() {
             merkle_root: response.merkle_root,
             signature: response.signature,
             agent_id: response.agent_id,
-            allowed_actions: response.allowed_actions,
+            allowed_actions: response.allowed_actions || [],
             goal: response.goal,
             created_at: response.created_at,
-            version: response.version,
+            version: response.version || '3.0.0',
           },
           status: 'signed',
         };
         setActivePlan(mockPlan);
         setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
-        setCustomLogsText(prev => prev + `[SYNC] Fetched active intent across tabs: ${response.intent_id.substring(0, 16)}...\n`);
-      }).catch(err => {
-        console.log('No active intent found on load for this user.');
-      });
-    }
+        setCustomLogsText(prev => prev + `[SYNC] Restored active intent from extension: ${response.intent_id.substring(0, 16)}...\n[GOAL] ${response.goal}\n`);
+        return; // Found in localStorage, no need to call API
+      }
+    } catch (_) {}
+
+    // 2. Fall back to API if localStorage is empty (e.g., goal was set from another device)
+    getActiveIntent(user.id).then(response => {
+      const mockPlan: PlanData = {
+        plan_id: response.intent_id,
+        contract: {
+          intent_hash: response.intent_hash,
+          merkle_root: response.merkle_root,
+          signature: response.signature,
+          agent_id: response.agent_id,
+          allowed_actions: response.allowed_actions,
+          goal: response.goal,
+          created_at: response.created_at,
+          version: response.version,
+        },
+        status: 'signed',
+      };
+      setActivePlan(mockPlan);
+      setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
+      setCustomLogsText(prev => prev + `[SYNC] Fetched active intent from server: ${response.intent_id.substring(0, 16)}...\n`);
+    }).catch(() => {
+      console.log('No active intent found for this user.');
+    });
   }, [user]);
 
   // ── Handler: Generate Intent (calls real /capture-intent) ──────────────────
