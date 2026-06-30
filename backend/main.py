@@ -238,6 +238,26 @@ async def health_check():
     }
 
 
+# ── NEW ENDPOINT: Active Intent ────────────────────────────────────────────────
+@app.get("/active-intent/{user_id}")
+async def get_active_intent(user_id: str):
+    plan_query = db.table("plans").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
+    if not plan_query.data:
+        raise HTTPException(status_code=404, detail="No active intent found")
+    plan = plan_query.data[0]
+    contract = _load_contract(plan.get("intent", "{}"))
+    return {
+        "intent_id": plan["id"],
+        "intent_hash": plan["intent_hash"],
+        "signature": plan["signature"],
+        "merkle_root": plan["merkle_root"],
+        "agent_id": plan["agent_id"],
+        "goal": plan["goal"],
+        "allowed_actions": contract.get("allowed_actions", []),
+        "created_at": plan["created_at"],
+        "version": "3.0.0"
+    }
+
 # ── NEW ENDPOINT 1: Capture Intent ───────────────────────────────────────────
 
 @app.post("/capture-intent", response_model=CaptureIntentResponse)

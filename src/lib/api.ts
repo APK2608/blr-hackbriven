@@ -40,6 +40,11 @@ export async function captureIntent(req: CaptureIntentRequest): Promise<CaptureI
   return post<CaptureIntentResponse>('/capture-intent', req);
 }
 
+/** Fetches the latest active intent for a user. */
+export async function getActiveIntent(userId: string): Promise<CaptureIntentResponse> {
+  return get<CaptureIntentResponse>(`/active-intent/${userId}`);
+}
+
 // ── Action Verification ───────────────────────────────────────────────────────
 
 /**

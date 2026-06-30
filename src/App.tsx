@@ -18,7 +18,7 @@ import Auth from './components/Auth';
 import { supabase } from './lib/supabase';
 import { PlanData, AuditLog, SystemStatus, Metrics as MetricsType } from './types';
 import { BACKEND_BASE_URL, RISK_REGISTRY, getFriendlyActionName } from './lib/constants';
-import { captureIntent, verifyAction, checkHealth } from './lib/api';
+import { captureIntent, verifyAction, checkHealth, getActiveIntent } from './lib/api';
 
 function getFormattedTime() {
   const d = new Date();
@@ -100,6 +100,33 @@ export default function App() {
     const computed = Math.round(ratio * 100);
     setMetrics(prev => ({ ...prev, trustScore: Math.max(0, Math.min(100, computed)) }));
   }, [metrics.allowedActions, metrics.totalActions]);
+
+  // Fetch active intent on load if user is logged in
+  useEffect(() => {
+    if (user) {
+      getActiveIntent(user.id).then(response => {
+        const mockPlan: PlanData = {
+          plan_id: response.intent_id,
+          contract: {
+            intent_hash: response.intent_hash,
+            merkle_root: response.merkle_root,
+            signature: response.signature,
+            agent_id: response.agent_id,
+            allowed_actions: response.allowed_actions,
+            goal: response.goal,
+            created_at: response.created_at,
+            version: response.version,
+          },
+          status: 'signed',
+        };
+        setActivePlan(mockPlan);
+        setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
+        setCustomLogsText(prev => prev + `[SYNC] Fetched active intent across tabs: ${response.intent_id.substring(0, 16)}...\n`);
+      }).catch(err => {
+        console.log('No active intent found on load for this user.');
+      });
+    }
+  }, [user]);
 
   // ── Handler: Generate Intent (calls real /capture-intent) ──────────────────
   const handleGenerateIntent = async (goal: string) => {
