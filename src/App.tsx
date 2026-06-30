@@ -18,7 +18,7 @@ import Auth from './components/Auth';
 import { supabase } from './lib/supabase';
 import { PlanData, AuditLog, SystemStatus, Metrics as MetricsType } from './types';
 import { BACKEND_BASE_URL, RISK_REGISTRY, getFriendlyActionName } from './lib/constants';
-import { captureIntent, verifyAction, checkHealth, getActiveIntent } from './lib/api';
+import { captureIntent, verifyAction, checkHealth, getActiveIntent, getAuditLogs } from './lib/api';
 
 function getFormattedTime() {
   const d = new Date();
@@ -84,8 +84,60 @@ export default function App() {
       setSystemStatus(prev => ({ ...prev, backend: isOnline ? 'online' : 'offline' }));
     };
     runHealthCheck();
+    const healthInterval = setInterval(runHealthCheck, 5000);
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(healthInterval);
+    };
+  }, []);
+
+  // ── NEW: Poll real audit logs from backend ──────────────────────────────────
+  useEffect(() => {
+    const fetchLogs = async () => {
+      try {
+        const { logs } = await getAuditLogs(50, 0);
+        const mappedLogs: AuditLog[] = logs.map(log => {
+          let statusLabel: any = 'ALLOWED';
+          if (log.status === 'blocked') statusLabel = 'BLOCKED';
+          if (log.status === 'pending_review') statusLabel = 'PENDING';
+          return {
+            id: log.id,
+            timestamp: log.timestamp,
+            status: statusLabel,
+            action: log.action || log.tool_name,
+            tool_name: log.tool_name,
+            risk_score: log.risk_score,
+            drift_score: log.drift_score,
+            drift_verdict: (log as any).drift_verdict,
+            reason: log.reason,
+            arguments: {},
+          };
+        });
+        setAuditLogs(mappedLogs);
+        
+        // Compute metrics from actual server data
+        if (mappedLogs.length > 0) {
+          let allowed = 0, blocked = 0;
+          mappedLogs.forEach(l => {
+            if (l.status === 'ALLOWED') allowed++;
+            if (l.status === 'BLOCKED') blocked++;
+          });
+          setMetrics(prev => ({
+            ...prev,
+            totalActions: mappedLogs.length,
+            allowedActions: allowed,
+            blockedActions: blocked
+          }));
+        }
+      } catch (err) {
+        // silently ignore polling errors to avoid console spam
+      }
+    };
+
+    fetchLogs();
+    const intervalId = setInterval(fetchLogs, 4000);
+    return () => clearInterval(intervalId);
   }, []);
 
   // Auth checks are now handled in the main render to avoid React Hooks violations

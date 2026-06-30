@@ -11,8 +11,8 @@
 (function () {
   'use strict';
 
-  const HIGH_RISK_KEYWORDS = ['delete', 'remove', 'drop', 'destroy', 'purge', 'wipe', 'cancel account'];
-  const PAYMENT_KEYWORDS = ['pay', 'checkout', 'buy now', 'place order', 'purchase', 'confirm order', 'submit payment'];
+  const HIGH_RISK_KEYWORDS = ['delete', 'remove', 'drop', 'destroy', 'purge', 'wipe', 'cancel account', 'api key', 'secret key', 'access token', 'password'];
+  const PAYMENT_KEYWORDS = ['pay', 'checkout', 'buy now', 'place order', 'purchase', 'confirm order', 'submit payment', 'card details', 'credit card', 'cvv', 'ssn'];
   const SEARCH_KEYWORDS = ['search', 'find', 'query', 'look up'];
 
   function classifyClick(el) {
