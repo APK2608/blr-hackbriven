@@ -11,7 +11,13 @@ let pendingCount = 0;
 async function getBackend() {
   try {
     const r = await fetch(`${FIREWALL_LOCAL}/health`, { signal: AbortSignal.timeout(1200) });
-    if (r.ok) return FIREWALL_LOCAL;
+    if (r.ok) {
+      const data = await r.json();
+      // Make sure it's actually our Intent Firewall backend, not an unrelated local server
+      if (data.armoriq_version || data.trust_layer || data.service?.includes?.('Intent Firewall')) {
+        return FIREWALL_LOCAL;
+      }
+    }
   } catch (_) {}
   return FIREWALL_URL;
 }
