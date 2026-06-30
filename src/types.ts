@@ -53,6 +53,7 @@ export interface CaptureIntentRequest {
   goal: string;
   plan?: string[];
   agent_id?: string;
+  user_id?: string;
   metadata?: Record<string, any>;
 }
 

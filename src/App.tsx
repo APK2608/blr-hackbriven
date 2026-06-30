@@ -14,6 +14,8 @@ import ExecutionTimeline from './components/ExecutionTimeline';
 import AlertNotification from './components/AlertNotification';
 import AgentSDK from './components/AgentSDK';
 import LiveMonitor from './components/LiveMonitor';
+import Auth from './components/Auth';
+import { supabase } from './lib/supabase';
 import { PlanData, AuditLog, SystemStatus, Metrics as MetricsType } from './types';
 import { BACKEND_BASE_URL, RISK_REGISTRY, getFriendlyActionName } from './lib/constants';
 import { captureIntent, verifyAction, checkHealth } from './lib/api';
@@ -25,6 +27,8 @@ function getFormattedTime() {
 }
 
 export default function App() {
+  const [user, setUser] = useState<any>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState('Dashboard');
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
     backend: 'loading',
@@ -63,14 +67,34 @@ export default function App() {
   const [riskThreshold, setRiskThreshold] = useState(7);
   const [customLogsText, setCustomLogsText] = useState('AGENT_BOUND_DAEMON :: started listening on port 3000\nARMOR_IQ :: cryptographic contract layer loaded\n');
 
-  // Fetch initial health on load
+  // Fetch initial health on load and set up Auth listener
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setIsAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setIsAuthLoading(false);
+    });
+
     const runHealthCheck = async () => {
       const isOnline = await checkHealth();
       setSystemStatus(prev => ({ ...prev, backend: isOnline ? 'online' : 'offline' }));
     };
     runHealthCheck();
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  if (isAuthLoading) {
+    return <div className="min-h-screen bg-black flex items-center justify-center"><div className="animate-spin h-8 w-8 border-2 border-emerald-500 border-t-transparent rounded-full"></div></div>;
+  }
+
+  if (!user) {
+    return <Auth />;
+  }
 
   // Update Trust Score based on Ratio of Allowed/Blocked
   useEffect(() => {

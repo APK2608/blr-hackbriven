@@ -134,6 +134,7 @@ class CaptureIntentRequest(BaseModel):
     goal: str
     plan: Optional[list[str]] = None          # optional list of planned action names
     agent_id: Optional[str] = None
+    user_id: Optional[str] = None
     metadata: Optional[dict] = {}
 
 class CaptureIntentResponse(BaseModel):
