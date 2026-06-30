@@ -39,6 +39,18 @@ chrome.storage.session.get(
       statAllowed.textContent = data.allowedCount || 0;
       statBlocked.textContent = data.blockedCount || 0;
       (data.actionQueue || []).forEach(addEventRow);
+    } else {
+      // Fallback: check chrome.storage.local for a saved intent
+      chrome.storage.local.get('intent_firewall_active', (localData) => {
+        if (localData.intent_firewall_active) {
+          try {
+            const parsed = JSON.parse(localData.intent_firewall_active);
+            if (parsed.intent_id) {
+              showMonitoringUI(parsed.intent_id, parsed.goal);
+            }
+          } catch (_) {}
+        }
+      });
     }
   }
 );
@@ -59,10 +71,15 @@ btnStart.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ goal, agent_id: 'intent-firewall-extension' }),
     });
+
+    if (!res.ok) {
+      throw new Error(`Backend error ${res.status}: ${await res.text()}`);
+    }
+
     const data = await res.json();
 
-    // ── Save intent to localStorage so the dashboard on any tab can read it ──
-    const intentPayload = {
+    // Save full intent payload in chrome.storage.local (persistent, readable by extension)
+    const intentPayload = JSON.stringify({
       intent_id: data.intent_id,
       intent_hash: data.intent_hash,
       signature: data.signature,
@@ -73,10 +90,8 @@ btnStart.addEventListener('click', async () => {
       created_at: data.created_at,
       version: data.version,
       activated_at: new Date().toISOString(),
-    };
-    try {
-      localStorage.setItem('intent_firewall_active', JSON.stringify(intentPayload));
-    } catch (_) {}
+    });
+    chrome.storage.local.set({ intent_firewall_active: intentPayload });
 
     // Tell background service worker to start monitoring
     chrome.runtime.sendMessage({
@@ -97,6 +112,7 @@ btnStart.addEventListener('click', async () => {
 // ── Stop monitoring ───────────────────────────────────────────────────────────
 btnStop.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'STOP_MONITORING' });
+  chrome.storage.local.remove('intent_firewall_active');
   setupSection.style.display = 'block';
   monitorSection.style.display = 'none';
   statusDot.className = 'status-dot';

@@ -142,4 +142,23 @@
     setTimeout(() => overlay?.remove(), 8000);
   }
 
+  // ── postMessage bridge: Dashboard requests active intent from extension ────────
+  // The dashboard (blr-hackbriven.vercel.app) sends INTENT_FIREWALL_REQUEST
+  // and this content script replies with INTENT_FIREWALL_RESPONSE from chrome.storage.local
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    if (event.data?.type === 'INTENT_FIREWALL_REQUEST') {
+      chrome.storage.local.get('intent_firewall_active', (data) => {
+        if (data.intent_firewall_active) {
+          try {
+            const payload = typeof data.intent_firewall_active === 'string'
+              ? JSON.parse(data.intent_firewall_active)
+              : data.intent_firewall_active;
+            window.postMessage({ type: 'INTENT_FIREWALL_RESPONSE', payload }, '*');
+          } catch (_) {}
+        }
+      });
+    }
+  });
+
 })();

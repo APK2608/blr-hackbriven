@@ -101,15 +101,18 @@ export default function App() {
     setMetrics(prev => ({ ...prev, trustScore: Math.max(0, Math.min(100, computed)) }));
   }, [metrics.allowedActions, metrics.totalActions]);
 
-  // Fetch active intent on load — reads localStorage (set by extension) first, then falls back to API
+  // Fetch active intent on load: request from extension via postMessage, then fall back to API
   useEffect(() => {
     if (!user) return;
 
-    // 1. Try localStorage first (written by browser extension popup.js immediately on activation)
-    try {
-      const stored = localStorage.getItem('intent_firewall_active');
-      if (stored) {
-        const response = JSON.parse(stored);
+    let resolved = false;
+
+    // Ask the extension content script for the stored intent payload
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== window || resolved) return;
+      if (event.data?.type === 'INTENT_FIREWALL_RESPONSE' && event.data.payload) {
+        resolved = true;
+        const response = event.data.payload;
         const mockPlan: PlanData = {
           plan_id: response.intent_id,
           contract: {
@@ -126,33 +129,47 @@ export default function App() {
         };
         setActivePlan(mockPlan);
         setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
-        setCustomLogsText(prev => prev + `[SYNC] Restored active intent from extension: ${response.intent_id.substring(0, 16)}...\n[GOAL] ${response.goal}\n`);
-        return; // Found in localStorage, no need to call API
+        setCustomLogsText(prev => prev + `[SYNC] Intent loaded from extension: ${response.intent_id.substring(0, 16)}...\n[GOAL] ${response.goal}\n`);
       }
-    } catch (_) {}
+    };
 
-    // 2. Fall back to API if localStorage is empty (e.g., goal was set from another device)
-    getActiveIntent(user.id).then(response => {
-      const mockPlan: PlanData = {
-        plan_id: response.intent_id,
-        contract: {
-          intent_hash: response.intent_hash,
-          merkle_root: response.merkle_root,
-          signature: response.signature,
-          agent_id: response.agent_id,
-          allowed_actions: response.allowed_actions,
-          goal: response.goal,
-          created_at: response.created_at,
-          version: response.version,
-        },
-        status: 'signed',
-      };
-      setActivePlan(mockPlan);
-      setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
-      setCustomLogsText(prev => prev + `[SYNC] Fetched active intent from server: ${response.intent_id.substring(0, 16)}...\n`);
-    }).catch(() => {
-      console.log('No active intent found for this user.');
-    });
+    window.addEventListener('message', handleMessage);
+    // Send request to content script (injected by extension)
+    window.postMessage({ type: 'INTENT_FIREWALL_REQUEST' }, '*');
+
+    // After 1 second, fall back to API if extension didn't respond
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        getActiveIntent(user.id).then(response => {
+          if (resolved) return;
+          resolved = true;
+          const mockPlan: PlanData = {
+            plan_id: response.intent_id,
+            contract: {
+              intent_hash: response.intent_hash,
+              merkle_root: response.merkle_root,
+              signature: response.signature,
+              agent_id: response.agent_id,
+              allowed_actions: response.allowed_actions,
+              goal: response.goal,
+              created_at: response.created_at,
+              version: response.version,
+            },
+            status: 'signed',
+          };
+          setActivePlan(mockPlan);
+          setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
+          setCustomLogsText(prev => prev + `[SYNC] Intent fetched from server: ${response.intent_id.substring(0, 16)}...\n`);
+        }).catch(() => {
+          console.log('No active intent found.');
+        });
+      }
+    }, 1200);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearTimeout(timer);
+    };
   }, [user]);
 
   // ── Handler: Generate Intent (calls real /capture-intent) ──────────────────

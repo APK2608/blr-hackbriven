@@ -78,71 +78,62 @@ export default function LiveMonitor() {
 
   pausedRef.current = paused;
 
+  // Poll /audit-logs every 4 seconds (SSE is unreliable on Render free tier)
   const connect = useCallback(() => {
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setConnecting(true);
 
-    const es = new EventSource(`${BACKEND_BASE_URL}/events/stream`);
-    esRef.current = es;
-
-    es.onopen = () => {
-      setConnected(true);
-      setConnecting(false);
-    };
-
-    es.onmessage = (e) => {
+    const poll = async () => {
       try {
-        const data = JSON.parse(e.data);
+        const res = await fetch(`${BACKEND_BASE_URL}/audit-logs?limit=30&offset=0`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        setConnected(true);
+        setConnecting(false);
 
-        // Heartbeat — just update timestamp
-        if (data.type === 'heartbeat') {
-          setLastHeartbeat(data.timestamp);
-          return;
-        }
+        const logs: LiveEvent[] = (json.logs || []).map((log: any) => ({
+          id: log.id,
+          intent_id: log.intent_id,
+          tool_name: log.tool_name,
+          action: log.action || log.tool_name,
+          url: log.url,
+          hostname: log.hostname,
+          source: log.source || 'agent',
+          status: log.status,
+          risk_score: log.risk_score,
+          drift_score: log.drift_score,
+          drift_verdict: log.drift_verdict,
+          reason: log.reason,
+          timestamp: log.timestamp,
+        }));
 
-        // History batch on connect
-        if (data.type === 'history' && Array.isArray(data.events)) {
-          if (!pausedRef.current) {
-            setEvents(prev => {
-              const combined = [...data.events, ...prev];
-              return combined.slice(0, 300);
-            });
-            data.events.forEach((ev: LiveEvent) => updateStats(ev));
-          }
-          return;
-        }
-
-        // Live single event
         if (!pausedRef.current) {
-          setEvents(prev => [data, ...prev].slice(0, 300));
-          updateStats(data);
-          if (data.intent_id) {
-            setActiveIntents(prev => new Set([...prev, data.intent_id!]));
-          }
+          setEvents(logs);
+          const newStats = { total: 0, allowed: 0, blocked: 0, pending: 0 };
+          logs.forEach(ev => {
+            newStats.total++;
+            if (ev.status === 'allowed') newStats.allowed++;
+            if (ev.status === 'blocked') newStats.blocked++;
+            if (ev.status === 'pending_review') newStats.pending++;
+          });
+          setStats(newStats);
+          setLastHeartbeat(new Date().toISOString());
         }
-      } catch (_) {}
+      } catch (_) {
+        setConnected(false);
+        setConnecting(false);
+      }
     };
 
-    es.onerror = () => {
-      setConnected(false);
-      setConnecting(false);
-      es.close();
-      esRef.current = null;
-      // Auto-reconnect after 5s
-      setTimeout(() => { if (!esRef.current) connect(); }, 5000);
-    };
+    poll();
+    const intervalId = setInterval(poll, 4000);
+    // Store interval id in ref so it can be cleared
+    (esRef as any).current = { close: () => clearInterval(intervalId) };
   }, []);
 
-  function updateStats(ev: LiveEvent) {
-    setStats(prev => ({
-      total: prev.total + 1,
-      allowed: prev.allowed + (ev.status === 'allowed' ? 1 : 0),
-      blocked: prev.blocked + (ev.status === 'blocked' ? 1 : 0),
-      pending: prev.pending + (ev.status === 'pending_review' ? 1 : 0),
-    }));
-  }
-
-  useEffect(() => { connect(); return () => { esRef.current?.close(); }; }, [connect]);
+  useEffect(() => {
+    connect();
+    return () => { (esRef as any).current?.close(); };
+  }, [connect]);
 
   // Auto-scroll to top when new events arrive (feed is newest-first)
   useEffect(() => {
