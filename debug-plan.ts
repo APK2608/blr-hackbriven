@@ -2,7 +2,7 @@
 import fetch from 'node-fetch';
 
 async function main() {
-  const url = 'https://intent-firewall.onrender.com';
+  const url = 'https://blr-hackbriven.onrender.com';
   
   console.log('--- Creating Plan ---');
   const res = await fetch(url + '/create-plan', {

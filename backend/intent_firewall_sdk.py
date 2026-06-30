@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-BASE_URL = os.getenv("INTENT_FIREWALL_URL", "https://intent-firewall.onrender.com")
+BASE_URL = os.getenv("INTENT_FIREWALL_URL", "https://blr-hackbriven.onrender.com")
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
  * Routes every significant action through /track-browser-action for real-time trust verification.
  */
 
-const FIREWALL_URL = 'https://intent-firewall.onrender.com';
+const FIREWALL_URL = 'https://blr-hackbriven.onrender.com';
 const FIREWALL_LOCAL = 'http://localhost:8000';
 
 // Session state

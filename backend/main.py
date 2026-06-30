@@ -701,7 +701,7 @@ async def get_intent_details(intent_id: str):
 @app.get("/sdk-info")
 async def sdk_info():
     """Returns integration guide for all supported agent frameworks."""
-    base = "https://intent-firewall.onrender.com"
+    base = "https://blr-hackbriven.onrender.com"
     return {
         "version": "3.0.0",
         "base_url": base,

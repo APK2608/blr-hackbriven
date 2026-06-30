@@ -3,7 +3,7 @@
  * Handles the extension popup UI: goal entry, intent capture, live feed.
  */
 
-const FIREWALL_URL = 'https://intent-firewall.onrender.com';
+const FIREWALL_URL = 'https://blr-hackbriven.onrender.com';
 const FIREWALL_LOCAL = 'http://localhost:8000';
 
 let pendingCount = 0;

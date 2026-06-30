@@ -23,7 +23,7 @@ export const RISK_REGISTRY: Record<string, number> = {
 
 export const HIGH_RISK_THRESHOLD = 7;
 
-export const BACKEND_BASE_URL = 'https://intent-firewall.onrender.com';
+export const BACKEND_BASE_URL = 'https://blr-hackbriven.onrender.com';
 
 export const SAMPLE_GOALS = [
   'Fix the login authentication bug in our application.',
