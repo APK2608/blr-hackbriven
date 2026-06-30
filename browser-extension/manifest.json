@@ -7,6 +7,7 @@
     "tabs",
     "activeTab",
     "webRequest",
+    "declarativeNetRequest",
     "storage",
     "notifications",
     "scripting",

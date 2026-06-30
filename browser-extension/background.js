@@ -78,6 +78,26 @@ function broadcastToPopup(event) {
   chrome.runtime.sendMessage({ type: 'FIREWALL_EVENT', event }).catch(() => {});
 }
 
+async function blockUrlDNR(urlToBlock) {
+  try {
+    const ruleId = Math.floor(Math.random() * 100000) + 1;
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      addRules: [{
+        id: ruleId,
+        priority: 1,
+        action: { type: 'block' },
+        condition: {
+          urlFilter: urlToBlock,
+          resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'ping', 'script', 'image', 'other']
+        }
+      }]
+    });
+    console.log('[IntentFirewall] DNR Rule added to block:', urlToBlock);
+  } catch (e) {
+    console.warn('[IntentFirewall] Failed to add DNR rule:', e);
+  }
+}
+
 // ── Navigation Monitoring ─────────────────────────────────────────────────────
 
 chrome.webNavigation.onCommitted.addListener(async (details) => {
@@ -117,6 +137,7 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
 
   if (result.status === 'blocked') {
     notifyBlocked('Navigate', url, result.reason, result.drift_score);
+    blockUrlDNR(url); // Add DNR rule to block further requests
     // Redirect to blocked page or close tab
     chrome.tabs.update(details.tabId, { url: `chrome-extension://${chrome.runtime.id}/blocked.html?url=${encodeURIComponent(url)}&reason=${encodeURIComponent(result.reason)}` });
   } else if (result.status !== 'unmonitored') {
@@ -168,13 +189,13 @@ chrome.webRequest.onBeforeRequest.addListener(
 
     if (result.status === 'blocked') {
       notifyBlocked(action, url, result.reason, result.drift_score);
-      return { cancel: true }; // Block the actual HTTP request
+      blockUrlDNR(url); // Add DNR rule to block further requests
+      // Note: In MV3, we cannot block HTTP requests synchronously here without declarativeNetRequest.
+      // We rely on the content script to prevent form submissions and clicks.
     }
-
-    return {};
   },
   { urls: ['<all_urls>'] },
-  ['blocking', 'requestBody']
+  ['requestBody']
 );
 
 // ── Content Script Messages ───────────────────────────────────────────────────
@@ -204,6 +225,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
 
     if (result.status === 'blocked') {
       notifyBlocked(msg.action, msg.url, result.reason, result.drift_score);
+      blockUrlDNR(msg.url); // Dynamically block any further requests
     }
 
     sendResponse({ status: result.status, reason: result.reason });
