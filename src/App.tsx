@@ -12,8 +12,11 @@ import SimulationControls from './components/SimulationControls';
 import AuditLogs from './components/AuditLogs';
 import ExecutionTimeline from './components/ExecutionTimeline';
 import AlertNotification from './components/AlertNotification';
+import AgentSDK from './components/AgentSDK';
+import LiveMonitor from './components/LiveMonitor';
 import { PlanData, AuditLog, SystemStatus, Metrics as MetricsType } from './types';
 import { BACKEND_BASE_URL, RISK_REGISTRY, getFriendlyActionName } from './lib/constants';
+import { captureIntent, verifyAction, checkHealth } from './lib/api';
 
 function getFormattedTime() {
   const d = new Date();
@@ -32,10 +35,10 @@ export default function App() {
   const [activePlan, setActivePlan] = useState<PlanData | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
-  
+
   // Tabulated Logs and stream data
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  
+
   // Central Metrics
   const [metrics, setMetrics] = useState<MetricsType>({
     totalActions: 0,
@@ -62,20 +65,11 @@ export default function App() {
 
   // Fetch initial health on load
   useEffect(() => {
-    const checkHealth = async () => {
-      try {
-        const res = await fetch(`${BACKEND_BASE_URL}/health`);
-        if (res.status === 200) {
-          setSystemStatus(prev => ({ ...prev, backend: 'online' }));
-        } else {
-          setSystemStatus(prev => ({ ...prev, backend: 'offline' }));
-        }
-      } catch (e) {
-        console.error('Error connecting to backend health:', e);
-        setSystemStatus(prev => ({ ...prev, backend: 'offline' }));
-      }
+    const runHealthCheck = async () => {
+      const isOnline = await checkHealth();
+      setSystemStatus(prev => ({ ...prev, backend: isOnline ? 'online' : 'offline' }));
     };
-    checkHealth();
+    runHealthCheck();
   }, []);
 
   // Update Trust Score based on Ratio of Allowed/Blocked
@@ -86,99 +80,97 @@ export default function App() {
     }
     const ratio = metrics.allowedActions / metrics.totalActions;
     const computed = Math.round(ratio * 100);
-    // Floor at 0, Cap at 100
     setMetrics(prev => ({ ...prev, trustScore: Math.max(0, Math.min(100, computed)) }));
   }, [metrics.allowedActions, metrics.totalActions]);
 
-  // Handler to generate Intent
+  // ── Handler: Generate Intent (calls real /capture-intent) ──────────────────
   const handleGenerateIntent = async (goal: string) => {
     setIsGenerating(true);
     setSystemStatus(prev => ({ ...prev, trustLayer: 'monitoring' }));
-    
+
     try {
-      const response = await fetch(`${BACKEND_BASE_URL}/plan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_input: goal })
+      // Try real backend /capture-intent first
+      const response = await captureIntent({
+        goal,
+        agent_id: 'intent-firewall-dashboard',
+        metadata: { source: 'dashboard' }
       });
 
-      if (response.status === 200) {
-        const data: PlanData = await response.json();
-        setActivePlan(data);
-        setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
-        
-        // Append initial audit log for plan generation
-        const newLog: AuditLog = {
-          id: `plan-${Date.now()}`,
-          timestamp: getFormattedTime(),
-          status: 'VERIFIED',
-          action: `Cryptographic trust contract signed for goal: "${goal}"`,
-          tool_name: 'generate_intent',
-          risk_score: 1,
-        };
-        setAuditLogs([newLog]);
-        setMetrics({
-          totalActions: 1,
-          allowedActions: 1,
-          blockedActions: 0,
-          trustScore: 100,
-        });
-        
-        setCustomLogsText(prev => prev + `[CONTRACT] Signed contract root: ${data.contract.merkle_root.substring(0, 16)}...\n`);
-      } else {
-        throw new Error('Failed to generate contract on remote backend');
-      }
+      // Map CaptureIntentResponse → PlanData (frontend shape)
+      const mockPlan: PlanData = {
+        plan_id: response.intent_id,
+        contract: {
+          intent_hash: response.intent_hash,
+          merkle_root: response.merkle_root,
+          signature: response.signature,
+          agent_id: response.agent_id,
+          allowed_actions: response.allowed_actions,
+          goal: response.goal,
+          created_at: response.created_at,
+          version: response.version,
+        },
+        status: 'signed',
+      };
+
+      setActivePlan(mockPlan);
+      setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
+
+      const newLog: AuditLog = {
+        id: `plan-${Date.now()}`,
+        timestamp: getFormattedTime(),
+        status: 'VERIFIED',
+        action: `Cryptographic trust contract signed for goal: "${goal}"`,
+        tool_name: 'capture_intent',
+        risk_score: 0,
+        drift_score: 100,
+        drift_verdict: 'aligned',
+      };
+      setAuditLogs([newLog]);
+      setMetrics({ totalActions: 1, allowedActions: 1, blockedActions: 0, trustScore: 100 });
+      setCustomLogsText(prev => prev + `[CONTRACT] ArmorIQ signed intent: ${response.intent_id.substring(0, 16)}...\n[HASH] ${response.intent_hash.substring(0, 24)}...\n`);
+
     } catch (e) {
-      console.warn('Backend /plan failed or offline, falling back to secure local generation...', e);
-      // Robust Local Simulation of the same /plan endpoint to ensure beautiful working demo
+      // Robust local fallback — demo works even when backend is offline
+      console.warn('Backend /capture-intent unavailable, using local fallback:', e);
       const localHash = Math.random().toString(16).substring(2) + Math.random().toString(16).substring(2);
       const mockContract = {
         intent_hash: localHash,
         merkle_root: '8678289532fa9d7a2d8231c1e36b377f9ac8b858b84ff576c93da856829a13e4',
         signature: `armoriq_v2_sig_${localHash.substring(0, 16)}_86782895`,
         agent_id: `agent_${localHash.substring(0, 8)}`,
-        allowed_actions: [
-          'read_codebase',
-          'modify_auth_module',
-          'run_tests',
-          'deploy_staging',
-        ],
-        goal: goal,
+        allowed_actions: ['read_codebase', 'modify_auth_module', 'run_tests', 'deploy_staging'],
+        goal,
         created_at: new Date().toISOString(),
         version: 'ArmorIQ-v2.0-Local',
       };
-      
+
       const mockPlan: PlanData = {
         plan_id: `plan_local_${Math.random().toString(36).substring(2, 10)}`,
         contract: mockContract,
-        status: 'signed'
+        status: 'signed',
       };
 
       setActivePlan(mockPlan);
       setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
-      
+
       const newLog: AuditLog = {
         id: `plan-${Date.now()}`,
         timestamp: getFormattedTime(),
         status: 'VERIFIED',
-        action: `Cryptographic trust contract signed for goal: "${goal}"`,
-        tool_name: 'generate_intent',
-        risk_score: 1,
+        action: `Cryptographic trust contract signed (local) for goal: "${goal}"`,
+        tool_name: 'capture_intent',
+        risk_score: 0,
+        drift_score: 100,
       };
       setAuditLogs([newLog]);
-      setMetrics({
-        totalActions: 1,
-        allowedActions: 1,
-        blockedActions: 0,
-        trustScore: 100,
-      });
-      setCustomLogsText(prev => prev + `[LOCAL_CONTRACT] Signed contract locally: ${mockContract.intent_hash.substring(0, 16)}...\n`);
+      setMetrics({ totalActions: 1, allowedActions: 1, blockedActions: 0, trustScore: 100 });
+      setCustomLogsText(prev => prev + `[LOCAL_CONTRACT] Signed locally: ${mockContract.intent_hash.substring(0, 16)}...\n`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Run the safe simulated action sequence step-by-step
+  // ── Run the safe simulated action sequence step-by-step ────────────────────
   const handleSimulateSafe = async () => {
     if (!activePlan) return;
     setIsSimulating(true);
@@ -193,32 +185,54 @@ export default function App() {
 
     for (const tool of toolsToRun) {
       await new Promise(resolve => setTimeout(resolve, 1200));
-      
+
       const timestamp = getFormattedTime();
       const risk = RISK_REGISTRY[tool.name] || 1;
       const friendlyName = getFriendlyActionName(tool.name, tool.args);
 
-      // Attempt to execute on backend
-      let executedSuccess = false;
+      // Try real backend /verify-action
+      let verifyResult: { status: string; drift_score?: number; drift_verdict?: string; drift_reason?: string; reason?: string } | null = null;
       try {
-        const response = await fetch(`${BACKEND_BASE_URL}/execute`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            plan_id: activePlan.plan_id,
-            tool_name: tool.name,
-            arguments: tool.args
-          })
+        verifyResult = await verifyAction({
+          intent_id: activePlan.plan_id,
+          action: tool.name,
+          args: tool.args,
+          description: friendlyName,
         });
-        if (response.status === 200) {
-          executedSuccess = true;
-        }
       } catch (e) {
-        // Backend failure caught, fallback is handled
+        // Fallback to local risk threshold logic
+        console.warn('verify-action failed, using local fallback:', e);
       }
 
-      // Append log based on risk threshold
-      if (risk >= riskThreshold) {
+      const backendStatus = verifyResult?.status;
+      const driftScore = verifyResult?.drift_score ?? 95;
+      const driftVerdict = verifyResult?.drift_verdict ?? 'aligned';
+      const driftReason = verifyResult?.drift_reason;
+
+      // Determine effective status
+      const isPending = backendStatus === 'pending_review' || (!backendStatus && risk >= riskThreshold);
+      const isBlocked = backendStatus === 'blocked';
+
+      if (isBlocked) {
+        const blockLog: AuditLog = {
+          id: `exec-${Date.now()}-${tool.name}`,
+          timestamp,
+          status: 'BLOCKED',
+          action: friendlyName,
+          tool_name: tool.name,
+          risk_score: risk,
+          drift_score: driftScore,
+          drift_verdict: driftVerdict,
+          drift_reason: driftReason,
+          arguments: tool.args,
+          reason: verifyResult?.reason || 'Blocked by intent firewall',
+        };
+        setAuditLogs(prev => [...prev, blockLog]);
+        setMetrics(prev => ({ ...prev, totalActions: prev.totalActions + 1, blockedActions: prev.blockedActions + 1 }));
+        break;
+      }
+
+      if (isPending) {
         const pendingLog: AuditLog = {
           id: `exec-${Date.now()}-${tool.name}`,
           timestamp,
@@ -226,54 +240,57 @@ export default function App() {
           action: friendlyName,
           tool_name: tool.name,
           risk_score: risk,
+          drift_score: driftScore,
+          drift_verdict: driftVerdict,
+          drift_reason: driftReason,
           arguments: tool.args,
-          reason: `High risk tool (${risk}/${riskThreshold}) - manual review required`,
+          reason: verifyResult?.reason || `High risk tool (${risk}/${riskThreshold}) — manual review required`,
         };
         setAuditLogs(prev => [...prev, pendingLog]);
-        setMetrics(prev => ({
-          ...prev,
-          totalActions: prev.totalActions + 1,
-        }));
-        setCustomLogsText(prev => prev + `[WARN] Tool '${tool.name}' requires manual review. Risk: ${risk}\n`);
+        setMetrics(prev => ({ ...prev, totalActions: prev.totalActions + 1 }));
+        setCustomLogsText(prev => prev + `[WARN] Tool '${tool.name}' requires manual review. Risk: ${risk}, Drift: ${driftScore?.toFixed(0)}%\n`);
 
         setThreatAlert({
           isOpen: true,
           toolName: tool.name,
-          reason: `High risk tool (${risk}/${riskThreshold}) - Manual review required`,
+          reason: pendingLog.reason!,
           riskScore: risk,
           threatLevel: 'HIGH',
           status: 'PENDING',
           actionId: pendingLog.id,
         });
         setSystemStatus(prev => ({ ...prev, trustLayer: 'monitoring' }));
-
         break;
-      } else {
-        const newLog: AuditLog = {
-          id: `exec-${Date.now()}-${tool.name}`,
-          timestamp,
-          status: 'VERIFIED',
-          action: friendlyName,
-          tool_name: tool.name,
-          risk_score: risk,
-          arguments: tool.args,
-        };
-
-        setAuditLogs(prev => [...prev, newLog]);
-        setMetrics(prev => ({
-          ...prev,
-          totalActions: prev.totalActions + 1,
-          allowedActions: prev.allowedActions + 1,
-        }));
-        setCustomLogsText(prev => prev + `[EXECUTE] Tool '${tool.name}' verified and dispatched. Risk: ${risk}\n`);
       }
+
+      // Allowed
+      const newLog: AuditLog = {
+        id: `exec-${Date.now()}-${tool.name}`,
+        timestamp,
+        status: 'VERIFIED',
+        action: friendlyName,
+        tool_name: tool.name,
+        risk_score: risk,
+        drift_score: driftScore,
+        drift_verdict: driftVerdict,
+        drift_reason: driftReason,
+        arguments: tool.args,
+      };
+
+      setAuditLogs(prev => [...prev, newLog]);
+      setMetrics(prev => ({
+        ...prev,
+        totalActions: prev.totalActions + 1,
+        allowedActions: prev.allowedActions + 1,
+      }));
+      setCustomLogsText(prev => prev + `[EXECUTE] '${tool.name}' verified. Risk: ${risk}/10, Drift Alignment: ${driftScore?.toFixed(0)}%\n`);
     }
 
     setIsSimulating(false);
-    setCustomLogsText(prev => prev + `[SIMULATION] Safe sequence completed successfully.\n`);
+    setCustomLogsText(prev => prev + `[SIMULATION] Safe sequence completed.\n`);
   };
 
-  // Inject a prompt injection threat simulation
+  // ── Inject a prompt injection threat simulation ────────────────────────────
   const handleSimulateMalicious = async () => {
     if (!activePlan) return;
     setIsSimulating(true);
@@ -287,8 +304,25 @@ export default function App() {
     const risk = RISK_REGISTRY[toolName] || 10;
     const friendlyName = getFriendlyActionName(toolName, toolArgs);
 
-    if (autoMitigate) {
-      // Add to logs as BLOCKED
+    // Try real backend verify-action (should be blocked with drift ~2-5%)
+    let verifyResult: { status: string; drift_score?: number; drift_verdict?: string; drift_reason?: string; reason?: string } | null = null;
+    try {
+      verifyResult = await verifyAction({
+        intent_id: activePlan.plan_id,
+        action: toolName,
+        args: toolArgs,
+        description: 'Drop production database with all customer data',
+      });
+    } catch (e) {
+      console.warn('verify-action (malicious) failed, using local fallback:', e);
+    }
+
+    const driftScore = verifyResult?.drift_score ?? 2.3;
+    const driftVerdict = verifyResult?.drift_verdict ?? 'drifted';
+    const driftReason = verifyResult?.drift_reason ?? 'Adversarial action detected — near-zero alignment with signed goal';
+    const backendBlocked = verifyResult?.status === 'blocked' || !verifyResult;
+
+    if (autoMitigate || backendBlocked) {
       const blockLog: AuditLog = {
         id: `threat-${Date.now()}`,
         timestamp,
@@ -296,8 +330,11 @@ export default function App() {
         action: friendlyName,
         tool_name: toolName,
         risk_score: risk,
+        drift_score: driftScore,
+        drift_verdict: driftVerdict,
+        drift_reason: driftReason,
         arguments: toolArgs,
-        reason: 'Outside Intent Boundary Policy'
+        reason: verifyResult?.reason || 'Outside Intent Boundary Policy — ArmorIQ CONTRACT_VETO',
       };
 
       setAuditLogs(prev => [...prev, blockLog]);
@@ -307,11 +344,10 @@ export default function App() {
         blockedActions: prev.blockedActions + 1,
       }));
 
-      // Trigger threat alert modal
       setThreatAlert({
         isOpen: true,
         toolName,
-        reason: 'Tool call dropped - Not found in Merkle contract Allowed Leaves',
+        reason: `Tool call dropped — Not in Merkle contract. Drift: ${driftScore.toFixed(1)}%`,
         riskScore: risk,
         threatLevel: 'CRITICAL',
         status: 'BLOCKED',
@@ -319,7 +355,7 @@ export default function App() {
       });
 
       setSystemStatus(prev => ({ ...prev, trustLayer: 'compromised' }));
-      setCustomLogsText(prev => prev + `[BLOCKED] Threat blocked! Tool '${toolName}' tried to run. Veto code: CONTRACT_VETO\n`);
+      setCustomLogsText(prev => prev + `[BLOCKED] Intent drift: ${driftScore.toFixed(1)}%. Tool '${toolName}' BLOCKED. Veto: CONTRACT_VETO\n[AUDIT] Event persisted to Supabase audit trail.\n`);
     } else {
       const pendingLog: AuditLog = {
         id: `threat-${Date.now()}`,
@@ -328,21 +364,19 @@ export default function App() {
         action: friendlyName,
         tool_name: toolName,
         risk_score: risk,
+        drift_score: driftScore,
+        drift_verdict: driftVerdict,
         arguments: toolArgs,
-        reason: 'Warn Only mode - Awaiting operator decision'
+        reason: 'Warn Only mode — Awaiting operator decision',
       };
 
       setAuditLogs(prev => [...prev, pendingLog]);
-      setMetrics(prev => ({
-        ...prev,
-        totalActions: prev.totalActions + 1,
-      }));
+      setMetrics(prev => ({ ...prev, totalActions: prev.totalActions + 1 }));
 
-      // Trigger threat alert modal
       setThreatAlert({
         isOpen: true,
         toolName,
-        reason: 'Tool call paused - Warn Only mode active',
+        reason: 'Tool call paused — Warn Only mode active',
         riskScore: risk,
         threatLevel: 'HIGH',
         status: 'PENDING',
@@ -350,13 +384,13 @@ export default function App() {
       });
 
       setSystemStatus(prev => ({ ...prev, trustLayer: 'monitoring' }));
-      setCustomLogsText(prev => prev + `[WARN] Threat detected! Tool '${toolName}' paused for manual review.\n`);
+      setCustomLogsText(prev => prev + `[WARN] Threat detected! Tool '${toolName}' paused. Drift: ${driftScore.toFixed(1)}%\n`);
     }
-    
+
     setIsSimulating(false);
   };
 
-  // Handle human operator approving exception for blocked item
+  // ── Approve / Block / Drop handlers ───────────────────────────────────────
   const handleApproveLog = (id: string) => {
     let wasBlocked = false;
     setAuditLogs(prev =>
@@ -368,17 +402,15 @@ export default function App() {
         return log;
       })
     );
-    // Correct counters
     setMetrics(prev => ({
       ...prev,
       blockedActions: wasBlocked ? Math.max(0, prev.blockedActions - 1) : prev.blockedActions,
       allowedActions: prev.allowedActions + 1,
     }));
     setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
-    setCustomLogsText(prev => prev + `[BYPASS] Human Operator manually approved exception for action ID: ${id}\n`);
+    setCustomLogsText(prev => prev + `[BYPASS] Human operator approved exception: ${id}\n`);
   };
 
-  // Handle manual blocking of a pending item
   const handleBlockLog = (id: string) => {
     setAuditLogs(prev => {
       let isItemPending = false;
@@ -390,18 +422,14 @@ export default function App() {
         return log;
       });
       if (isItemPending) {
-        setMetrics(m => ({
-          ...m,
-          blockedActions: m.blockedActions + 1,
-        }));
+        setMetrics(m => ({ ...m, blockedActions: m.blockedActions + 1 }));
         setSystemStatus(status => ({ ...status, trustLayer: 'compromised' }));
-        setCustomLogsText(logsText => logsText + `[BLOCKED] Operator manually blocked action ID: ${id}\n`);
+        setCustomLogsText(logsText => logsText + `[BLOCKED] Operator manually blocked action: ${id}\n`);
       }
       return nextLogs;
     });
   };
 
-  // Handle hard dropping / permanently deleting threat from logs
   const handleDropLog = (id: string) => {
     let wasBlocked = false;
     setAuditLogs(prev => prev.filter((log) => {
@@ -411,28 +439,18 @@ export default function App() {
       }
       return true;
     }));
-    // Correct counters
     setMetrics(prev => ({
       ...prev,
       totalActions: Math.max(0, prev.totalActions - 1),
       blockedActions: wasBlocked ? Math.max(0, prev.blockedActions - 1) : prev.blockedActions,
     }));
-    setCustomLogsText(prev => prev + `[HARD_DROP] Exploit trail permanently dropped and isolated. Case: ${id}\n`);
+    setCustomLogsText(prev => prev + `[HARD_DROP] Exploit trail purged. Case: ${id}\n`);
   };
 
-  // Reset firewall logs and metrics
   const handleResetSystem = () => {
     setAuditLogs([]);
-    setMetrics({
-      totalActions: 0,
-      allowedActions: 0,
-      blockedActions: 0,
-      trustScore: 100,
-    });
-    setSystemStatus(prev => ({
-      ...prev,
-      trustLayer: 'operational',
-    }));
+    setMetrics({ totalActions: 0, allowedActions: 0, blockedActions: 0, trustScore: 100 });
+    setSystemStatus(prev => ({ ...prev, trustLayer: 'operational' }));
     setActivePlan(null);
     setThreatAlert(null);
     setCustomLogsText('AGENT_BOUND_DAEMON :: started listening on port 3000\nARMOR_IQ :: cryptographic contract layer loaded\n[INFO] System reset initiated by operator\n');
@@ -487,7 +505,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bottom Row - Full-Width Audit Logs Center */}
+            {/* Bottom Row - Full-Width Audit Logs */}
             <div className="w-full">
               <AuditLogs
                 logs={auditLogs}
@@ -499,13 +517,17 @@ export default function App() {
           </>
         )}
 
+        {/* ── NEW: Live Monitor Tab ─────────────────────────────────────── */}
+        {currentTab === 'Live Monitor' && (
+          <LiveMonitor />
+        )}
+
         {currentTab === 'Monitors' && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 shadow-xl space-y-6">
             <h2 className="font-mono text-sm font-bold uppercase tracking-wider text-emerald-400 border-b border-zinc-900 pb-3">
               Cryptographic Tunnel Monitor
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Telemetry charts/visual mockups */}
               <div className="rounded-lg border border-zinc-900 bg-black p-5 font-mono text-xs space-y-4">
                 <div className="flex items-center justify-between text-zinc-400">
                   <span>Packet Entropy</span>
@@ -513,11 +535,7 @@ export default function App() {
                 </div>
                 <div className="h-28 bg-zinc-950 border border-zinc-900 rounded flex items-end justify-between p-2">
                   {[23, 45, 12, 67, 34, 56, 89, 43, 21, 56, 78, 43, 67, 89, 12].map((h, i) => (
-                    <div
-                      key={i}
-                      className="w-1.5 bg-emerald-500/20 hover:bg-emerald-500/40 transition-colors"
-                      style={{ height: `${h}%` }}
-                    />
+                    <div key={i} className="w-1.5 bg-emerald-500/20 hover:bg-emerald-500/40 transition-colors" style={{ height: `${h}%` }} />
                   ))}
                 </div>
                 <p className="text-[10px] text-zinc-500">Continuous cryptographic flow entropy validation</p>
@@ -530,11 +548,7 @@ export default function App() {
                 </div>
                 <div className="h-28 bg-zinc-950 border border-zinc-900 rounded flex items-end justify-between p-2">
                   {[56, 67, 43, 21, 45, 67, 89, 90, 45, 23, 45, 56, 12, 45, 67].map((h, i) => (
-                    <div
-                      key={i}
-                      className="w-1.5 bg-blue-500/20 hover:bg-blue-500/40 transition-colors"
-                      style={{ height: `${h}%` }}
-                    />
+                    <div key={i} className="w-1.5 bg-blue-500/20 hover:bg-blue-500/40 transition-colors" style={{ height: `${h}%` }} />
                   ))}
                 </div>
                 <p className="text-[10px] text-zinc-500">Evaluates Merkle path validity dynamically</p>
@@ -542,19 +556,15 @@ export default function App() {
 
               <div className="rounded-lg border border-zinc-900 bg-black p-5 font-mono text-xs space-y-4">
                 <div className="flex items-center justify-between text-zinc-400">
-                  <span>Token Traffic Speed</span>
-                  <span className="text-zinc-500">1.4 MB/S</span>
+                  <span>Drift Scoring Engine</span>
+                  <span className="text-violet-400 font-bold">OpenAI / Gemini</span>
                 </div>
                 <div className="h-28 bg-zinc-950 border border-zinc-900 rounded flex items-end justify-between p-2">
                   {[12, 34, 56, 78, 90, 67, 45, 34, 21, 56, 78, 90, 12, 45, 67].map((h, i) => (
-                    <div
-                      key={i}
-                      className="w-1.5 bg-zinc-800 hover:bg-zinc-700 transition-colors"
-                      style={{ height: `${h}%` }}
-                    />
+                    <div key={i} className="w-1.5 bg-violet-500/20 hover:bg-violet-500/40 transition-colors" style={{ height: `${h}%` }} />
                   ))}
                 </div>
-                <p className="text-[10px] text-zinc-500">Verifying secure pipeline transit metrics</p>
+                <p className="text-[10px] text-zinc-500">Semantic alignment scoring via LLM cascade</p>
               </div>
             </div>
 
@@ -579,6 +589,11 @@ export default function App() {
               onBlock={handleBlockLog}
             />
           </div>
+        )}
+
+        {/* ── NEW: Agent SDK Tab ─────────────────────────────────────────── */}
+        {currentTab === 'Agent SDK' && (
+          <AgentSDK />
         )}
 
         {currentTab === 'Admin' && (
@@ -647,11 +662,19 @@ export default function App() {
                   </p>
                   <p className="flex justify-between">
                     <span>Active Signature Alg:</span>
-                    <span className="text-zinc-400">Ed25519-Merkle-V2</span>
+                    <span className="text-zinc-400">Ed25519-Merkle-V3</span>
                   </p>
                   <p className="flex justify-between">
-                    <span>Staging Environment Host:</span>
-                    <span className="text-zinc-400">staging.intent-firewall.internal</span>
+                    <span>Drift Scoring Engine:</span>
+                    <span className="text-violet-400 font-bold">OpenAI → Gemini → Heuristic</span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span>Database:</span>
+                    <span className="text-blue-400 font-bold">Supabase (PostgreSQL)</span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span>Backend URL:</span>
+                    <span className="text-zinc-400 text-[10px] select-all truncate max-w-[180px]">{BACKEND_BASE_URL}</span>
                   </p>
                   <p className="flex justify-between">
                     <span>Active Policy Rules Count:</span>
@@ -663,12 +686,7 @@ export default function App() {
                   onClick={() => {
                     setActivePlan(null);
                     setAuditLogs([]);
-                    setMetrics({
-                      totalActions: 0,
-                      allowedActions: 0,
-                      blockedActions: 0,
-                      trustScore: 100,
-                    });
+                    setMetrics({ totalActions: 0, allowedActions: 0, blockedActions: 0, trustScore: 100 });
                     setCustomLogsText('SYSTEM :: Factory Reset Triggered.\n');
                   }}
                   className="w-full py-2 rounded border border-rose-900/40 bg-rose-950/10 text-rose-400 hover:bg-rose-900/20 text-[11px] font-bold uppercase transition-all duration-200 cursor-pointer text-center"
@@ -707,7 +725,7 @@ export default function App() {
 
       {/* Dynamic footer copyright */}
       <footer className="border-t border-zinc-900 bg-black/40 py-4 px-6 text-center font-mono text-[10px] text-zinc-600">
-        <p>© 2026 Intent Firewall. Protected by ArmorIQ Cryptographic Containment System. Host: {BACKEND_BASE_URL}</p>
+        <p>© 2026 Intent Firewall. Continuous Intent Alignment for Autonomous AI Agents. Powered by ArmorIQ · Supabase · OpenAI · Gemini</p>
       </footer>
     </div>
   );

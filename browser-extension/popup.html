@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Intent Firewall</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 360px;
+      min-height: 420px;
+      background: #07090c;
+      color: #e4e4e7;
+      font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+      font-size: 12px;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    .header {
+      background: linear-gradient(135deg, #0a1a12 0%, #071210 100%);
+      border-bottom: 1px solid #14532d40;
+      padding: 14px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 8px; }
+    .logo-icon { font-size: 18px; }
+    .logo-text { font-size: 13px; font-weight: bold; color: #34d399; letter-spacing: 1px; text-transform: uppercase; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #6b7280; box-shadow: 0 0 8px #6b7280;
+    }
+    .status-dot.active { background: #10b981; box-shadow: 0 0 10px #10b981; animation: pulse 2s infinite; }
+    .status-dot.blocked { background: #ef4444; box-shadow: 0 0 10px #ef4444; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+    /* ── Intent Setup ────────────────────────────────────────────────── */
+    .section { padding: 14px 16px; border-bottom: 1px solid #18181b; }
+    .section-label {
+      font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px;
+      color: #52525b; margin-bottom: 8px; font-weight: bold;
+    }
+    textarea {
+      width: 100%; background: #09090b; border: 1px solid #27272a;
+      color: #d4d4d8; border-radius: 6px; padding: 8px 10px;
+      font-family: inherit; font-size: 11px; resize: none;
+      outline: none; line-height: 1.5;
+    }
+    textarea:focus { border-color: #10b981; box-shadow: 0 0 0 2px #10b98130; }
+
+    .btn-row { display: flex; gap: 6px; margin-top: 8px; }
+    button {
+      flex: 1; padding: 8px; border-radius: 6px; cursor: pointer;
+      font-family: inherit; font-size: 11px; font-weight: bold;
+      text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #064e3b; border-color: #10b981; color: #34d399;
+    }
+    .btn-primary:hover { background: #065f46; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-stop {
+      background: #450a0a; border-color: #ef4444; color: #fca5a5;
+    }
+    .btn-stop:hover { background: #7f1d1d; }
+
+    /* ── Stats Bar ───────────────────────────────────────────────────── */
+    .stats-bar {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      padding: 10px 16px; gap: 6px; background: #09090b;
+      border-bottom: 1px solid #18181b;
+    }
+    .stat { text-align: center; }
+    .stat-value { font-size: 18px; font-weight: bold; line-height: 1; }
+    .stat-label { font-size: 9px; color: #52525b; text-transform: uppercase; margin-top: 2px; }
+    .stat-value.green { color: #10b981; }
+    .stat-value.red   { color: #ef4444; }
+    .stat-value.amber { color: #f59e0b; }
+
+    /* ── Intent ID display ───────────────────────────────────────────── */
+    .intent-display {
+      padding: 10px 16px; background: #0c1a11;
+      border-bottom: 1px solid #14532d30;
+    }
+    .intent-id {
+      font-size: 10px; color: #34d399;
+      background: #052e16; border: 1px solid #14532d;
+      border-radius: 4px; padding: 4px 8px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      cursor: pointer; display: block;
+    }
+    .intent-id:hover { background: #064e3b; }
+
+    /* ── Live Event Feed ─────────────────────────────────────────────── */
+    .events-header {
+      padding: 8px 16px 4px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #events-list { max-height: 220px; overflow-y: auto; }
+    .event-item {
+      padding: 8px 16px; border-bottom: 1px solid #18181b;
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+    .event-dot {
+      width: 6px; height: 6px; border-radius: 50%; margin-top: 4px; flex-shrink: 0;
+    }
+    .event-dot.allowed { background: #10b981; }
+    .event-dot.blocked { background: #ef4444; }
+    .event-dot.pending_review { background: #f59e0b; }
+    .event-dot.unmonitored { background: #52525b; }
+    .event-content { flex: 1; min-width: 0; }
+    .event-action { color: #d4d4d8; font-size: 11px; font-weight: bold; }
+    .event-url {
+      font-size: 10px; color: #71717a;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .event-meta { display: flex; gap: 6px; margin-top: 2px; }
+    .badge {
+      font-size: 9px; padding: 1px 5px; border-radius: 3px;
+      font-weight: bold; text-transform: uppercase;
+    }
+    .badge.allowed { background: #052e16; color: #10b981; border: 1px solid #14532d; }
+    .badge.blocked { background: #450a0a; color: #ef4444; border: 1px solid #7f1d1d; }
+    .badge.pending_review { background: #451a03; color: #f59e0b; border: 1px solid #78350f; }
+    .drift-badge {
+      font-size: 9px; padding: 1px 5px; border-radius: 3px; color: #a1a1aa;
+    }
+    .empty { padding: 24px 16px; text-align: center; color: #3f3f46; font-size: 11px; }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    .footer {
+      padding: 8px 16px; text-align: center;
+      font-size: 9px; color: #3f3f46; border-top: 1px solid #18181b;
+    }
+    .footer a { color: #10b981; text-decoration: none; }
+
+    /* ── Loading spinner ─────────────────────────────────────────────── */
+    .spinner {
+      display: inline-block; width: 10px; height: 10px;
+      border: 2px solid #27272a; border-top-color: #10b981;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <span class="logo-icon">🛡️</span>
+    <span class="logo-text">Intent Firewall</span>
+  </div>
+  <div id="status-dot" class="status-dot"></div>
+</div>
+
+<!-- Intent Setup -->
+<div class="section" id="setup-section">
+  <div class="section-label">Agent Goal (Describe the task)</div>
+  <textarea id="goal-input" rows="3" placeholder="e.g. Order a Samsung watch under $200 on Amazon"></textarea>
+  <div class="btn-row">
+    <button class="btn-primary" id="btn-start">🔐 Activate Firewall</button>
+  </div>
+</div>
+
+<!-- Active monitoring state (hidden until active) -->
+<div id="monitoring-section" style="display:none">
+  <div class="intent-display">
+    <div class="section-label">Active Intent Contract</div>
+    <span class="intent-id" id="intent-id-display" title="Click to copy">—</span>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn-stop" id="btn-stop">⏹ Stop Monitoring</button>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat">
+      <div class="stat-value green" id="stat-allowed">0</div>
+      <div class="stat-label">Allowed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value red" id="stat-blocked">0</div>
+      <div class="stat-label">Blocked</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value amber" id="stat-pending">0</div>
+      <div class="stat-label">Pending</div>
+    </div>
+  </div>
+
+  <div class="events-header">
+    <span class="section-label" style="margin:0">Live Action Feed</span>
+    <span id="live-dot" style="display:flex;align-items:center;gap:4px;font-size:9px;color:#52525b">
+      <span class="status-dot active" style="width:5px;height:5px"></span> LIVE
+    </span>
+  </div>
+  <div id="events-list">
+    <div class="empty" id="events-empty">Monitoring all browser activity...<br>Actions will appear here as they occur.</div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="http://localhost:3000" target="_blank">Open Dashboard ↗</a> &nbsp;·&nbsp; ArmorIQ v3.0
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

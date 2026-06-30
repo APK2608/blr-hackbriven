@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blocked by Intent Firewall</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: radial-gradient(ellipse at center, #0f0505 0%, #07090c 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: #e4e4e7;
+    }
+    .card {
+      max-width: 520px; width: 90%;
+      background: #0c0a0a;
+      border: 1px solid #7f1d1d60;
+      border-radius: 16px;
+      padding: 40px 36px;
+      box-shadow: 0 0 60px rgba(239,68,68,0.15), 0 0 120px rgba(239,68,68,0.05);
+      text-align: center;
+    }
+    .icon { font-size: 64px; margin-bottom: 20px; }
+    h1 {
+      font-size: 18px; font-weight: bold; color: #ef4444;
+      text-transform: uppercase; letter-spacing: 3px; margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 12px; color: #71717a; margin-bottom: 28px; line-height: 1.6;
+    }
+    .info-row {
+      background: #09090b; border: 1px solid #27272a;
+      border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;
+      text-align: left;
+    }
+    .info-label { font-size: 9px; color: #52525b; text-transform: uppercase; letter-spacing: 1px; }
+    .info-value { font-size: 11px; color: #a1a1aa; margin-top: 3px; word-break: break-all; }
+    .info-value.red { color: #fca5a5; }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    button {
+      flex: 1; padding: 10px; border-radius: 8px; cursor: pointer;
+      font-family: inherit; font-size: 11px; font-weight: bold;
+      text-transform: uppercase; letter-spacing: 1px; border: 1px solid;
+    }
+    .btn-back { background: #064e3b; border-color: #10b981; color: #34d399; }
+    .btn-back:hover { background: #065f46; }
+    .btn-dash { background: #0c0a0a; border-color: #27272a; color: #71717a; }
+    .btn-dash:hover { border-color: #52525b; color: #a1a1aa; }
+    .sig {
+      margin-top: 24px; font-size: 9px; color: #3f3f46;
+      letter-spacing: 1px; text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🔒</div>
+    <h1>Access Blocked</h1>
+    <p class="subtitle">
+      Intent Firewall detected this action is outside the<br>
+      signed ArmorIQ intent contract for this agent session.
+    </p>
+
+    <div class="info-row">
+      <div class="info-label">Blocked URL</div>
+      <div class="info-value red" id="blocked-url">—</div>
+    </div>
+    <div class="info-row">
+      <div class="info-label">Reason</div>
+      <div class="info-value" id="blocked-reason">Outside signed intent boundary</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-back" onclick="history.back()">← Go Back</button>
+      <button class="btn-dash" onclick="window.open('http://localhost:3000')">Dashboard ↗</button>
+    </div>
+
+    <p class="sig">Intent Firewall · ArmorIQ v3.0 · Trust Layer Active</p>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const url = params.get('url') || '';
+    const reason = params.get('reason') || 'Outside signed intent boundary';
+    document.getElementById('blocked-url').textContent = url || '(unknown)';
+    document.getElementById('blocked-reason').textContent = reason;
+  </script>
+</body>
+</html>

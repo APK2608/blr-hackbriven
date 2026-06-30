@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Database, Filter, ArrowRight, ShieldCheck, Trash2, CheckCircle2, AlertOctagon, HelpCircle } from 'lucide-react';
 import { AuditLog } from '../types';
+import { DriftBadge } from './DriftScore';
 
 interface AuditLogsProps {
   logs: AuditLog[];
@@ -69,6 +70,7 @@ export default function AuditLogs({ logs, onApprove, onDrop, onBlock }: AuditLog
                 <th className="py-2.5 px-3">Timestamp</th>
                 <th className="py-2.5 px-3">Status</th>
                 <th className="py-2.5 px-3">Action</th>
+                <th className="py-2.5 px-3 hidden md:table-cell">Drift</th>
                 <th className="py-2.5 px-3 text-right">Controls</th>
               </tr>
             </thead>
@@ -123,6 +125,15 @@ export default function AuditLogs({ logs, onApprove, onDrop, onBlock }: AuditLog
                         </span>
                       )}
                     </div>
+                  </td>
+
+                  {/* Drift Score badge */}
+                  <td className="py-3 px-3 hidden md:table-cell whitespace-nowrap">
+                    {log.drift_score !== undefined ? (
+                      <DriftBadge score={log.drift_score} />
+                    ) : (
+                      <span className="font-mono text-[10px] text-zinc-700">—</span>
+                    )}
                   </td>
 
                   {/* Action / Control buttons (matching the design image) */}

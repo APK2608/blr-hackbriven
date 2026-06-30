@@ -22,7 +22,7 @@ export default function Header({
   auditLogs = [],
   onResetSystem,
 }: HeaderProps) {
-  const tabs = ['Dashboard', 'Monitors', 'Security Logs', 'Admin'];
+  const tabs = ['Dashboard', 'Live Monitor', 'Monitors', 'Security Logs', 'Agent SDK', 'Admin'];
 
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);

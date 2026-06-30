@@ -6,6 +6,7 @@
 import React from 'react';
 import { Clock, CheckCircle2, XCircle, ChevronRight, Terminal } from 'lucide-react';
 import { AuditLog } from '../types';
+import { DriftBadge } from './DriftScore';
 
 interface ExecutionTimelineProps {
   logs: AuditLog[];
@@ -75,7 +76,7 @@ export default function ExecutionTimeline({ logs }: ExecutionTimelineProps) {
                         </div>
                       </div>
 
-                      <div className="flex items-center">
+                      <div className="flex items-center gap-2">
                         {isSuccess ? (
                           <span className="text-emerald-400 font-bold text-sm" title="Verified Safe">
                             ✓
@@ -88,6 +89,9 @@ export default function ExecutionTimeline({ logs }: ExecutionTimelineProps) {
                           <span className="text-amber-400 font-bold text-sm" title="Awaiting Approval">
                             ?
                           </span>
+                        )}
+                        {log.drift_score !== undefined && (
+                          <DriftBadge score={log.drift_score} />
                         )}
                       </div>
                     </div>

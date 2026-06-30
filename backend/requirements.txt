@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+openai
+google-generativeai
+python-dotenv
+supabase
+pydantic
+requests
+httpx
+python-multipart
